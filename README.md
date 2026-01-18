@@ -1,2 +1,2 @@
 # nota-orbis
-Personal knowledge ecosystem with Go-based automation tools
+Personal knowledge ecosystem with Go and TypeScript based automation tools
