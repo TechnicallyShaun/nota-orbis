@@ -1,8 +1,12 @@
 # Nota Orbis - Claude Context
 
 ## Stack
-- **Go**: CLI commands, file watchers, APIs, webhooks
-- **TypeScript**: Automation helpers for AI-enhanced vault workflows
+- **Go**: Application layer - CLI commands, file watchers, APIs, webhooks, infrastructure
+- **TypeScript**: Internal tools designed for use by AI agents within the vault
+
+**When to use which:**
+- Go: If it's part of the application itself (commands, watchers, services)
+- TypeScript: If it's a tool that AI agents will invoke or interact with
 
 ## Directory Structure
 ```
@@ -22,7 +26,7 @@ nota_orbis/
 ```
 
 ## Development Philosophy
-- **Contract-first where possible**: Define interfaces and tests before implementation
+- **Contract-first where possible**: Write the interface or type signature first, then write a test that uses it, then implement. Example: define `TranscribeAudio(path string) (string, error)` → write test expecting text output → implement the function.
 - **Extensibility-aware**: When choosing between approaches, consider future extension
 - **Ubuntu-first**: Target Ubuntu, cover full lifecycle (install → maintain → uninstall)
 

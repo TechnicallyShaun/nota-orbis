@@ -10,4 +10,8 @@ See CLAUDE.md for stack and directory layout.
 - Tools run from within the vault, as part of user workflows
 
 ## Session Workflow
-See "Landing the Plane" in the rig-level AGENTS.md for session completion protocol.
+Before ending a work session:
+1. Run tests (`go test ./...`, `npm test`)
+2. Commit and push changes
+3. File issues for any remaining work
+4. Provide context for the next session
