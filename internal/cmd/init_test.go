@@ -7,12 +7,26 @@ import (
 	"testing"
 )
 
-func TestInitCmd_RequiresNameArgument(t *testing.T) {
+func TestInitCmd_NoArgumentsRequired(t *testing.T) {
+	tmpDir := t.TempDir()
+	originalWd, _ := os.Getwd()
+	defer os.Chdir(originalWd)
+	os.Chdir(tmpDir)
+
 	cmd := NewInitCmd()
 	cmd.SetArgs([]string{})
 	err := cmd.Execute()
+	if err != nil {
+		t.Errorf("expected no error with no arguments, got: %v", err)
+	}
+}
+
+func TestInitCmd_RejectsArguments(t *testing.T) {
+	cmd := NewInitCmd()
+	cmd.SetArgs([]string{"unexpected-arg"})
+	err := cmd.Execute()
 	if err == nil {
-		t.Error("expected error when no name argument provided")
+		t.Error("expected error when arguments provided")
 	}
 }
 
@@ -23,7 +37,7 @@ func TestInitCmd_InitializesVault(t *testing.T) {
 	os.Chdir(tmpDir)
 
 	cmd := NewInitCmd()
-	cmd.SetArgs([]string{"test-vault"})
+	cmd.SetArgs([]string{})
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
@@ -32,6 +46,34 @@ func TestInitCmd_InitializesVault(t *testing.T) {
 	notaDir := filepath.Join(tmpDir, ".nota")
 	if _, err := os.Stat(notaDir); os.IsNotExist(err) {
 		t.Error("expected .nota directory to be created")
+	}
+}
+
+func TestInitCmd_UsesDirectoryNameAsVaultName(t *testing.T) {
+	// Create a temp directory with a specific name
+	parentDir := t.TempDir()
+	vaultDir := filepath.Join(parentDir, "my-vault-name")
+	if err := os.Mkdir(vaultDir, 0755); err != nil {
+		t.Fatalf("failed to create vault dir: %v", err)
+	}
+
+	originalWd, _ := os.Getwd()
+	defer os.Chdir(originalWd)
+	os.Chdir(vaultDir)
+
+	var buf bytes.Buffer
+	cmd := NewInitCmd()
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{})
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	output := buf.String()
+	expected := "Initialized vault 'my-vault-name'\n"
+	if output != expected {
+		t.Errorf("expected %q, got: %q", expected, output)
 	}
 }
 
@@ -44,15 +86,17 @@ func TestInitCmd_PrintsSuccessMessage(t *testing.T) {
 	var buf bytes.Buffer
 	cmd := NewInitCmd()
 	cmd.SetOut(&buf)
-	cmd.SetArgs([]string{"my-vault"})
+	cmd.SetArgs([]string{})
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 
 	output := buf.String()
-	if output != "Initialized vault 'my-vault'\n" {
-		t.Errorf("expected success message, got: %q", output)
+	dirName := filepath.Base(tmpDir)
+	expected := "Initialized vault '" + dirName + "'\n"
+	if output != expected {
+		t.Errorf("expected %q, got: %q", expected, output)
 	}
 }
 
@@ -66,7 +110,7 @@ func TestInitCmd_ReturnsErrorWhenVaultExists(t *testing.T) {
 	os.Mkdir(filepath.Join(tmpDir, ".nota"), 0755)
 
 	cmd := NewInitCmd()
-	cmd.SetArgs([]string{"test-vault"})
+	cmd.SetArgs([]string{})
 	err := cmd.Execute()
 	if err == nil {
 		t.Error("expected error when vault already exists")
