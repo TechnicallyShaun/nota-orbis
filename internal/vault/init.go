@@ -27,51 +27,61 @@ var paraFolders = []string{
 }
 
 var (
-	ErrVaultExists = errors.New("vault already exists")
-	ErrNameEmpty   = errors.New("vault name cannot be empty")
+	ErrNameEmpty = errors.New("vault name cannot be empty")
 )
+
+// InitResult contains information about the result of vault initialization
+type InitResult struct {
+	// AlreadyExisted is true if the vault was already initialized
+	AlreadyExisted bool
+	// FoldersCreated lists any PARA folders that were created
+	FoldersCreated []string
+}
 
 // Init initializes a new vault at the given path with the specified name.
 // It creates the .nota directory, vault.json metadata file, and PARA+ folders.
 // Existing folders with matching names (case-insensitive) are skipped.
-func Init(path, name string) error {
+// If the vault already exists, it creates any missing PARA folders without
+// modifying existing content (idempotent operation).
+func Init(path, name string) (*InitResult, error) {
 	if name == "" {
-		return ErrNameEmpty
+		return nil, ErrNameEmpty
 	}
 
 	notaDir := filepath.Join(path, ".nota")
+	result := &InitResult{}
 
 	// Check if vault already exists
 	if _, err := os.Stat(notaDir); err == nil {
-		return ErrVaultExists
-	}
+		result.AlreadyExisted = true
+	} else {
+		// Create .nota directory
+		if err := os.MkdirAll(notaDir, 0755); err != nil {
+			return nil, err
+		}
 
-	// Create .nota directory
-	if err := os.MkdirAll(notaDir, 0755); err != nil {
-		return err
-	}
+		// Create vault.json
+		metadata := VaultMetadata{
+			Name:      name,
+			CreatedAt: time.Now().UTC().Format(time.RFC3339),
+			Version:   "1.0",
+		}
 
-	// Create vault.json
-	metadata := VaultMetadata{
-		Name:      name,
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
-		Version:   "1.0",
-	}
+		metadataJSON, err := json.MarshalIndent(metadata, "", "  ")
+		if err != nil {
+			return nil, err
+		}
 
-	metadataJSON, err := json.MarshalIndent(metadata, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	vaultJSONPath := filepath.Join(notaDir, "vault.json")
-	if err := os.WriteFile(vaultJSONPath, metadataJSON, 0644); err != nil {
-		return err
+		vaultJSONPath := filepath.Join(notaDir, "vault.json")
+		if err := os.WriteFile(vaultJSONPath, metadataJSON, 0644); err != nil {
+			return nil, err
+		}
 	}
 
 	// Create PARA+ folders, skipping existing ones (case-insensitive)
 	existingFolders, err := getExistingFolders(path)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	for _, folder := range paraFolders {
@@ -80,11 +90,12 @@ func Init(path, name string) error {
 		}
 		folderPath := filepath.Join(path, folder)
 		if err := os.MkdirAll(folderPath, 0755); err != nil {
-			return err
+			return nil, err
 		}
+		result.FoldersCreated = append(result.FoldersCreated, folder)
 	}
 
-	return nil
+	return result, nil
 }
 
 // getExistingFolders returns a list of existing folder names in the given path

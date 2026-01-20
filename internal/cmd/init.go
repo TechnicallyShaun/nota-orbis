@@ -17,11 +17,20 @@ func NewInitCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 
-			if err := vault.Init(".", name); err != nil {
+			result, err := vault.Init(".", name)
+			if err != nil {
 				return err
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Initialized vault '%s'\n", name)
+			if result.AlreadyExisted {
+				if len(result.FoldersCreated) > 0 {
+					fmt.Fprintf(cmd.OutOrStdout(), "Vault already initialized. Created missing folders: %v\n", result.FoldersCreated)
+				} else {
+					fmt.Fprintf(cmd.OutOrStdout(), "Vault already initialized\n")
+				}
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "Initialized vault '%s'\n", name)
+			}
 			return nil
 		},
 	}
