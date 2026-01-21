@@ -279,3 +279,68 @@ func TestGetExistingFolders_PermissionDenied(t *testing.T) {
 		t.Errorf("expected permission error, got: %v", err)
 	}
 }
+
+func TestInit_ErrorWhenCannotCreateNotaDir(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Make the directory read-only so .nota cannot be created
+	if err := os.Chmod(tmpDir, 0555); err != nil {
+		t.Fatalf("failed to chmod: %v", err)
+	}
+	defer os.Chmod(tmpDir, 0755)
+
+	_, err := Init(tmpDir, "test-vault")
+	if err == nil {
+		t.Error("expected error when .nota directory cannot be created")
+	}
+}
+
+func TestInit_ErrorWhenCannotReadExistingFolders(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create .nota so Init skips creating it
+	notaDir := filepath.Join(tmpDir, ".nota")
+	if err := os.Mkdir(notaDir, 0755); err != nil {
+		t.Fatalf("failed to create .nota directory: %v", err)
+	}
+	vaultJSON := filepath.Join(notaDir, "vault.json")
+	if err := os.WriteFile(vaultJSON, []byte(`{"name":"test","created_at":"2024-01-01T00:00:00Z","version":"1.0"}`), 0644); err != nil {
+		t.Fatalf("failed to create vault.json: %v", err)
+	}
+
+	// Make the vault directory unreadable (can't list contents)
+	if err := os.Chmod(tmpDir, 0000); err != nil {
+		t.Fatalf("failed to chmod: %v", err)
+	}
+	defer os.Chmod(tmpDir, 0755)
+
+	_, err := Init(tmpDir, "test-vault")
+	if err == nil {
+		t.Error("expected error when directory contents cannot be read")
+	}
+}
+
+func TestInit_ErrorWhenCannotCreateParaFolder(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create .nota so Init skips creating it
+	notaDir := filepath.Join(tmpDir, ".nota")
+	if err := os.Mkdir(notaDir, 0755); err != nil {
+		t.Fatalf("failed to create .nota directory: %v", err)
+	}
+	vaultJSON := filepath.Join(notaDir, "vault.json")
+	if err := os.WriteFile(vaultJSON, []byte(`{"name":"test","created_at":"2024-01-01T00:00:00Z","version":"1.0"}`), 0644); err != nil {
+		t.Fatalf("failed to create vault.json: %v", err)
+	}
+
+	// Create a file named "Inbox" to block folder creation
+	inboxPath := filepath.Join(tmpDir, "Inbox")
+	if err := os.WriteFile(inboxPath, []byte("blocker"), 0644); err != nil {
+		t.Fatalf("failed to create blocking file: %v", err)
+	}
+
+	_, err := Init(tmpDir, "test-vault")
+	if err == nil {
+		t.Error("expected error when PARA folder cannot be created")
+	}
+}
