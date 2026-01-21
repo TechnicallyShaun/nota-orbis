@@ -8,8 +8,11 @@ builds:
       - CGO_ENABLED=0
     goos:
       - linux
+      - darwin
+      - windows
     goarch:
       - amd64
+      - arm64
     ldflags:
       - -s -w
       - -X github.com/TechnicallyShaun/nota-orbis/internal/cmd.Version={{.Version}}
@@ -20,6 +23,9 @@ archives:
     builds:
       - nota
     format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - LICENSE
