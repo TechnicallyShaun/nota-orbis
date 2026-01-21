@@ -10,9 +10,13 @@ import (
 func TestInit_CreatesVaultDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	err := Init(tmpDir, "test-vault")
+	result, err := Init(tmpDir, "test-vault")
 	if err != nil {
 		t.Fatalf("Init failed: %v", err)
+	}
+
+	if result.AlreadyExisted {
+		t.Error("expected AlreadyExisted to be false for new vault")
 	}
 
 	notaDir := filepath.Join(tmpDir, ".nota")
@@ -24,7 +28,7 @@ func TestInit_CreatesVaultDirectory(t *testing.T) {
 func TestInit_CreatesVaultJson(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	err := Init(tmpDir, "test-vault")
+	_, err := Init(tmpDir, "test-vault")
 	if err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
@@ -38,7 +42,7 @@ func TestInit_CreatesVaultJson(t *testing.T) {
 func TestInit_CreatesAllParaFolders(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	err := Init(tmpDir, "test-vault")
+	result, err := Init(tmpDir, "test-vault")
 	if err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
@@ -49,6 +53,10 @@ func TestInit_CreatesAllParaFolders(t *testing.T) {
 		if _, err := os.Stat(folderPath); os.IsNotExist(err) {
 			t.Errorf("expected %s folder to exist", folder)
 		}
+	}
+
+	if len(result.FoldersCreated) != len(expectedFolders) {
+		t.Errorf("expected %d folders created, got %d", len(expectedFolders), len(result.FoldersCreated))
 	}
 }
 
@@ -67,7 +75,7 @@ func TestInit_SkipsExistingFolderLowercase(t *testing.T) {
 		t.Fatalf("failed to create marker file: %v", err)
 	}
 
-	err := Init(tmpDir, "test-vault")
+	_, err := Init(tmpDir, "test-vault")
 	if err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
@@ -99,7 +107,7 @@ func TestInit_SkipsExistingFolderCapitalized(t *testing.T) {
 		t.Fatalf("failed to create marker file: %v", err)
 	}
 
-	err := Init(tmpDir, "test-vault")
+	_, err := Init(tmpDir, "test-vault")
 	if err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
@@ -110,25 +118,46 @@ func TestInit_SkipsExistingFolderCapitalized(t *testing.T) {
 	}
 }
 
-func TestInit_ErrorWhenVaultExists(t *testing.T) {
+func TestInit_IdempotentWhenVaultExists(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	// Create .nota directory to simulate existing vault
+	// Create .nota directory with vault.json to simulate existing vault
 	notaDir := filepath.Join(tmpDir, ".nota")
 	if err := os.Mkdir(notaDir, 0755); err != nil {
 		t.Fatalf("failed to create .nota directory: %v", err)
 	}
+	vaultJSON := filepath.Join(notaDir, "vault.json")
+	if err := os.WriteFile(vaultJSON, []byte(`{"name":"original","created_at":"2024-01-01T00:00:00Z","version":"1.0"}`), 0644); err != nil {
+		t.Fatalf("failed to create vault.json: %v", err)
+	}
 
-	err := Init(tmpDir, "test-vault")
-	if err != ErrVaultExists {
-		t.Errorf("expected ErrVaultExists, got: %v", err)
+	result, err := Init(tmpDir, "test-vault")
+	if err != nil {
+		t.Fatalf("Init should succeed on existing vault, got: %v", err)
+	}
+
+	if !result.AlreadyExisted {
+		t.Error("expected AlreadyExisted to be true")
+	}
+
+	// Verify original vault.json is preserved (not overwritten)
+	data, err := os.ReadFile(vaultJSON)
+	if err != nil {
+		t.Fatalf("failed to read vault.json: %v", err)
+	}
+	var metadata VaultMetadata
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		t.Fatalf("failed to unmarshal vault.json: %v", err)
+	}
+	if metadata.Name != "original" {
+		t.Errorf("expected vault.json name to be 'original', got '%s'", metadata.Name)
 	}
 }
 
 func TestInit_ErrorWhenNameEmpty(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	err := Init(tmpDir, "")
+	_, err := Init(tmpDir, "")
 	if err != ErrNameEmpty {
 		t.Errorf("expected ErrNameEmpty, got: %v", err)
 	}
@@ -137,7 +166,7 @@ func TestInit_ErrorWhenNameEmpty(t *testing.T) {
 func TestInit_VaultJsonHasCorrectSchema(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	err := Init(tmpDir, "my-test-vault")
+	_, err := Init(tmpDir, "my-test-vault")
 	if err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
@@ -163,5 +192,47 @@ func TestInit_VaultJsonHasCorrectSchema(t *testing.T) {
 
 	if metadata.CreatedAt == "" {
 		t.Errorf("expected created_at to be set")
+	}
+}
+
+func TestInit_CreatesMissingFoldersOnExistingVault(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create .nota directory with vault.json to simulate existing vault
+	notaDir := filepath.Join(tmpDir, ".nota")
+	if err := os.Mkdir(notaDir, 0755); err != nil {
+		t.Fatalf("failed to create .nota directory: %v", err)
+	}
+	vaultJSON := filepath.Join(notaDir, "vault.json")
+	if err := os.WriteFile(vaultJSON, []byte(`{"name":"test","created_at":"2024-01-01T00:00:00Z","version":"1.0"}`), 0644); err != nil {
+		t.Fatalf("failed to create vault.json: %v", err)
+	}
+
+	// Create only some PARA folders
+	os.Mkdir(filepath.Join(tmpDir, "Inbox"), 0755)
+	os.Mkdir(filepath.Join(tmpDir, "Projects"), 0755)
+
+	result, err := Init(tmpDir, "test-vault")
+	if err != nil {
+		t.Fatalf("Init should succeed, got: %v", err)
+	}
+
+	if !result.AlreadyExisted {
+		t.Error("expected AlreadyExisted to be true")
+	}
+
+	// Should have created the 4 missing folders
+	expectedCreated := []string{"Journal", "Areas", "Resources", "Archive"}
+	if len(result.FoldersCreated) != len(expectedCreated) {
+		t.Errorf("expected %d folders created, got %d: %v", len(expectedCreated), len(result.FoldersCreated), result.FoldersCreated)
+	}
+
+	// Verify all folders now exist
+	allFolders := []string{"Inbox", "Journal", "Projects", "Areas", "Resources", "Archive"}
+	for _, folder := range allFolders {
+		folderPath := filepath.Join(tmpDir, folder)
+		if _, err := os.Stat(folderPath); os.IsNotExist(err) {
+			t.Errorf("expected %s folder to exist", folder)
+		}
 	}
 }
