@@ -236,3 +236,46 @@ func TestInit_CreatesMissingFoldersOnExistingVault(t *testing.T) {
 		}
 	}
 }
+
+func TestGetExistingFolders_NonExistentPath(t *testing.T) {
+	// Test that getExistingFolders returns nil, nil for non-existent path
+	folders, err := getExistingFolders("/nonexistent/path/that/does/not/exist")
+	if err != nil {
+		t.Errorf("expected nil error for non-existent path, got: %v", err)
+	}
+	if folders != nil {
+		t.Errorf("expected nil folders for non-existent path, got: %v", folders)
+	}
+}
+
+func TestGetExistingFolders_PermissionDenied(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping permission test when running as root")
+	}
+
+	tmpDir := t.TempDir()
+
+	// Create a directory with no read permissions
+	unreadableDir := filepath.Join(tmpDir, "unreadable")
+	if err := os.Mkdir(unreadableDir, 0755); err != nil {
+		t.Fatalf("failed to create unreadable directory: %v", err)
+	}
+
+	// Remove read permissions
+	if err := os.Chmod(unreadableDir, 0000); err != nil {
+		t.Fatalf("failed to chmod directory: %v", err)
+	}
+	// Restore permissions on cleanup so t.TempDir() can remove it
+	t.Cleanup(func() {
+		os.Chmod(unreadableDir, 0755)
+	})
+
+	// Test that getExistingFolders returns an error for unreadable directory
+	folders, err := getExistingFolders(unreadableDir)
+	if err == nil {
+		t.Errorf("expected error for unreadable directory, got nil (folders: %v)", folders)
+	}
+	if !os.IsPermission(err) {
+		t.Errorf("expected permission error, got: %v", err)
+	}
+}
