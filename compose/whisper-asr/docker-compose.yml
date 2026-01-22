@@ -1,0 +1,27 @@
+version: '3.8'
+services:
+  whisper-asr-webservice:
+    # Official image for the OpenAI Whisper ASR webservice.
+    # This service provides a web API for transcribing audio using OpenAI's Whisper model.
+    # For more details, refer to: https://github.com/ahmetoner/whisper-asr-webservice
+    image: onerahmet/openai-whisper-asr-webservice:latest
+    container_name: whisper-asr-webservice
+    # By default, the service exposes port 9000.
+    # Map container port 9000 to host port 9000.
+    ports:
+      - "9000:9000"
+    # To enable GPU support, uncomment the following line and ensure Docker Desktop (or equivalent) is configured for GPU.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    # volumes:
+    #   - ./audio_files:/app/audio_files # Example: Mount a local directory for audio input
+    # environment:
+    #   - ASR_MODEL=base # Specify the Whisper model to use (e.g., tiny, base, small, medium, large)
+    #   - ASR_TASK=transcribe # Specify the task (transcribe or translate)
+    #   - ASR_LANG=en # Specify the language of the audio
+    restart: unless-stopped
