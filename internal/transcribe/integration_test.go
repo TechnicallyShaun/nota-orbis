@@ -1,7 +1,7 @@
 //go:build linux
 
-// Package transcribe contains integration tests for the full file watcher pipeline.
-package transcribe
+// Package transcribe_test contains integration tests for the full file watcher pipeline.
+package transcribe_test
 
 import (
 	"context"

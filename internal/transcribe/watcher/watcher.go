@@ -9,21 +9,12 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/TechnicallyShaun/nota-orbis/internal/transcribe"
 	"golang.org/x/sys/unix"
 )
 
-// FileEvent represents a detected file.
-type FileEvent struct {
-	Path      string
-	Size      int64
-	Timestamp time.Time
-}
-
-// FileWatcher detects new files in a directory.
-type FileWatcher interface {
-	Watch(ctx context.Context, dir string, patterns []string) (<-chan FileEvent, error)
-	Stop() error
-}
+// Compile-time interface check.
+var _ transcribe.FileWatcher = (*InotifyWatcher)(nil)
 
 // InotifyWatcher implements FileWatcher using Linux inotify.
 type InotifyWatcher struct {
@@ -48,7 +39,7 @@ func NewInotifyWatcher() (*InotifyWatcher, error) {
 }
 
 // Watch starts watching the specified directory for files matching the patterns.
-func (w *InotifyWatcher) Watch(ctx context.Context, dir string, patterns []string) (<-chan FileEvent, error) {
+func (w *InotifyWatcher) Watch(ctx context.Context, dir string, patterns []string) (<-chan transcribe.FileEvent, error) {
 	// Add watch for the directory
 	wd, err := unix.InotifyAddWatch(w.fd, dir, unix.IN_CLOSE_WRITE|unix.IN_MOVED_TO)
 	if err != nil {
@@ -57,7 +48,7 @@ func (w *InotifyWatcher) Watch(ctx context.Context, dir string, patterns []strin
 	w.wd = wd
 	w.patterns = patterns
 
-	events := make(chan FileEvent, 100)
+	events := make(chan transcribe.FileEvent, 100)
 
 	go w.readEvents(ctx, dir, events)
 
@@ -78,7 +69,7 @@ func (w *InotifyWatcher) Stop() error {
 	return unix.Close(w.fd)
 }
 
-func (w *InotifyWatcher) readEvents(ctx context.Context, dir string, events chan<- FileEvent) {
+func (w *InotifyWatcher) readEvents(ctx context.Context, dir string, events chan<- transcribe.FileEvent) {
 	defer close(events)
 
 	buf := make([]byte, 4096)
@@ -120,7 +111,7 @@ func (w *InotifyWatcher) readEvents(ctx context.Context, dir string, events chan
 					fullPath := filepath.Join(dir, name)
 					info, err := os.Stat(fullPath)
 					if err == nil {
-						events <- FileEvent{
+						events <- transcribe.FileEvent{
 							Path:      fullPath,
 							Size:      info.Size(),
 							Timestamp: time.Now(),
