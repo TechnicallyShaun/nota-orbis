@@ -341,3 +341,88 @@ func TestWriter_Write_NoSourceFile(t *testing.T) {
 		t.Error("output should not contain Source when SourceFile is empty")
 	}
 }
+
+func TestWriter_Write_CollisionWithPreExistingFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	writer := NewWriter()
+
+	ts := time.Date(2024, 3, 15, 14, 30, 0, 0, time.UTC)
+
+	// Pre-create a file with the expected filename before any Write call
+	preExistingFile := filepath.Join(tmpDir, "2024-03-15-1430-voice-note.md")
+	if err := os.WriteFile(preExistingFile, []byte("Pre-existing content"), 0644); err != nil {
+		t.Fatalf("failed to create pre-existing file: %v", err)
+	}
+
+	opts := transcribe.OutputOptions{
+		OutputDir: tmpDir,
+		Timestamp: ts,
+	}
+
+	// First Write should detect the pre-existing file and use -2 suffix
+	path, err := writer.Write(context.Background(), "New transcription.", opts)
+	if err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	expectedFilename := "2024-03-15-1430-voice-note-2.md"
+	if filepath.Base(path) != expectedFilename {
+		t.Errorf("unexpected filename: got %s, want %s", filepath.Base(path), expectedFilename)
+	}
+
+	// Verify pre-existing file was not modified
+	preExistingContent, err := os.ReadFile(preExistingFile)
+	if err != nil {
+		t.Fatalf("failed to read pre-existing file: %v", err)
+	}
+	if string(preExistingContent) != "Pre-existing content" {
+		t.Error("pre-existing file was modified")
+	}
+
+	// Verify new file has correct content
+	newContent, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read new file: %v", err)
+	}
+	if !strings.Contains(string(newContent), "New transcription.") {
+		t.Error("new file missing expected content")
+	}
+}
+
+func TestWriter_Write_CollisionWithMultiplePreExistingFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	writer := NewWriter()
+
+	ts := time.Date(2024, 3, 15, 14, 30, 0, 0, time.UTC)
+
+	// Pre-create base file and -2 through -5 files
+	preExistingFiles := []string{
+		"2024-03-15-1430-voice-note.md",
+		"2024-03-15-1430-voice-note-2.md",
+		"2024-03-15-1430-voice-note-3.md",
+		"2024-03-15-1430-voice-note-4.md",
+		"2024-03-15-1430-voice-note-5.md",
+	}
+	for _, name := range preExistingFiles {
+		filePath := filepath.Join(tmpDir, name)
+		if err := os.WriteFile(filePath, []byte("existing"), 0644); err != nil {
+			t.Fatalf("failed to create pre-existing file %s: %v", name, err)
+		}
+	}
+
+	opts := transcribe.OutputOptions{
+		OutputDir: tmpDir,
+		Timestamp: ts,
+	}
+
+	// Write should find -6 as the first available suffix
+	path, err := writer.Write(context.Background(), "Test content.", opts)
+	if err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	expectedFilename := "2024-03-15-1430-voice-note-6.md"
+	if filepath.Base(path) != expectedFilename {
+		t.Errorf("unexpected filename: got %s, want %s", filepath.Base(path), expectedFilename)
+	}
+}
