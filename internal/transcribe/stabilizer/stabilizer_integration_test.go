@@ -185,3 +185,104 @@ func TestPollStabilizer_ResetOnSizeChange(t *testing.T) {
 		t.Errorf("stabilizer should have reset counter on size change, elapsed: %v", elapsed)
 	}
 }
+
+func TestPollStabilizer_Timeout(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "test.txt")
+
+	// Create a file that we'll keep modifying
+	f, err := os.Create(testFile)
+	if err != nil {
+		t.Fatalf("failed to create file: %v", err)
+	}
+	f.Close()
+
+	stabilizer := &PollStabilizer{
+		Interval: 50 * time.Millisecond,
+		Checks:   10,
+		Timeout:  150 * time.Millisecond,
+	}
+
+	ctx := context.Background() // No deadline on context
+
+	// Keep modifying the file
+	stopWriter := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-stopWriter:
+				return
+			default:
+				f, err := os.OpenFile(testFile, os.O_APPEND|os.O_WRONLY, 0644)
+				if err != nil {
+					return
+				}
+				f.WriteString("x")
+				f.Close()
+				time.Sleep(30 * time.Millisecond)
+			}
+		}
+	}()
+
+	err = stabilizer.WaitForStable(ctx, testFile)
+	close(stopWriter) // Stop the writer
+
+	if err != ErrStabilizationTimeout {
+		t.Errorf("expected ErrStabilizationTimeout, got: %v", err)
+	}
+}
+
+func TestPollStabilizer_TimeoutNotAppliedWithContextDeadline(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "test.txt")
+
+	// Create a file that we'll keep modifying
+	f, err := os.Create(testFile)
+	if err != nil {
+		t.Fatalf("failed to create file: %v", err)
+	}
+	f.Close()
+
+	stabilizer := &PollStabilizer{
+		Interval: 50 * time.Millisecond,
+		Checks:   10,
+		Timeout:  5 * time.Second, // Long timeout
+	}
+
+	// Context with short deadline takes precedence
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	// Keep modifying the file
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				f, err := os.OpenFile(testFile, os.O_APPEND|os.O_WRONLY, 0644)
+				if err != nil {
+					return
+				}
+				f.WriteString("x")
+				f.Close()
+				time.Sleep(30 * time.Millisecond)
+			}
+		}
+	}()
+
+	start := time.Now()
+	err = stabilizer.WaitForStable(ctx, testFile)
+	elapsed := time.Since(start)
+
+	// Should return context.DeadlineExceeded (not ErrStabilizationTimeout)
+	// because context deadline is respected when present
+	if err != context.DeadlineExceeded {
+		t.Errorf("expected context.DeadlineExceeded, got: %v", err)
+	}
+
+	// Should have respected context deadline (~100ms), not stabilizer timeout (5s)
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("took too long, expected ~100ms but got: %v", elapsed)
+	}
+}
