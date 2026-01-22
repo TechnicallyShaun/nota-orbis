@@ -60,7 +60,7 @@ Watch folder [required]: /mnt/sync/voice-notes
 Transcription API URL [required]: http://nas:9000/asr
 Output location (inbox) [required]: /home/user/vault/Inbox
 Template file [optional, Enter to skip]:
-Audio archive location [default: /nota/archive/audio]:
+Audio archive location [default: ~/.nota/archive/audio]:
 
 Configuration saved to /home/user/vault/.nota/transcribe.json
 ```
@@ -125,7 +125,7 @@ Configuration stored at: `{vault}/.nota/transcribe.json`
   "api_url": "http://nas:9000/asr",
   "output_dir": "/home/user/vault/Inbox",
   "template_path": null,
-  "archive_dir": "/nota/archive/audio",
+  "archive_dir": "~/.nota/archive/audio",
   "watch_patterns": ["*.m4a", "*.mp3", "*.wav"],
   "stabilization_interval_ms": 2000,
   "stabilization_checks": 3,
@@ -144,7 +144,7 @@ Configuration stored at: `{vault}/.nota/transcribe.json`
 | `api_url` | Yes | - | Transcription service endpoint |
 | `output_dir` | Yes | - | Vault inbox location for transcribed notes |
 | `template_path` | No | `null` | Optional markdown template to append to |
-| `archive_dir` | No | `/nota/archive/audio` | Where to archive processed M4A files |
+| `archive_dir` | No | `~/.nota/archive/audio` | Where to archive processed M4A files |
 | `watch_patterns` | No | `["*.m4a", "*.mp3", "*.wav"]` | File patterns to process |
 | `stabilization_interval_ms` | No | `2000` | Ms between file size checks |
 | `stabilization_checks` | No | `3` | Consecutive stable checks required |
@@ -204,7 +204,7 @@ source: meeting-notes.m4a
 ### On Failure
 
 1. Original file remains in droppoint (not deleted)
-2. Error logged to `/nota/logs/transcribe-YYYY-MM-DD.log`
+2. Error logged to `~/.nota/logs/transcribe-YYYY-MM-DD.log`
 3. Error note created in vault inbox:
 
 ```markdown
@@ -218,7 +218,7 @@ timestamp: 2026-01-22T14:30:00Z
 
 **File:** meeting-notes.m4a
 **Error:** Connection refused to transcription service
-**Log:** See /nota/logs/transcribe-2026-01-22.log
+**Log:** See ~/.nota/logs/transcribe-2026-01-22.log
 
 Original file remains at: /mnt/sync/voice-notes/meeting-notes.m4a
 ```
@@ -235,8 +235,8 @@ Original file remains at: /mnt/sync/voice-notes/meeting-notes.m4a
 
 | Path | Purpose |
 |------|---------|
-| `/nota/logs/` | Service logs |
-| `/nota/archive/audio/` | Archived original audio files |
+| `~/.nota/logs/` | Service logs |
+| `~/.nota/archive/audio/` | Archived original audio files |
 | `{vault}/.nota/transcribe.json` | Per-vault configuration |
 
 ---
@@ -245,7 +245,7 @@ Original file remains at: /mnt/sync/voice-notes/meeting-notes.m4a
 
 ### Log Location
 
-`/nota/logs/transcribe-YYYY-MM-DD.log`
+`~/.nota/logs/transcribe-YYYY-MM-DD.log`
 
 ### Log Format
 
@@ -384,47 +384,85 @@ Each file processed in its own goroutine. Multiple files can stabilize and proce
 
 ## Transcription Service
 
+### Container Selection
+
+**Image:** `onerahmet/openai-whisper-asr-webservice`
+
+| Feature | Detail |
+|---------|--------|
+| REST API | Yes, with Swagger UI |
+| Port | 9000 |
+| Engines | openai_whisper, faster_whisper, whisperx |
+| Output formats | text, JSON, VTT, SRT, TSV |
+| GPU support | Optional (CPU works fine) |
+
+**Source:** [GitHub - ahmetoner/whisper-asr-webservice](https://github.com/ahmetoner/whisper-asr-webservice)
+
 ### Docker Compose
+
+See: `compose/whisper-asr/docker-compose.yml` (to be created by polecat)
 
 ```yaml
 version: "3.8"
 
 services:
-  faster-whisper:
-    image: lscr.io/linuxserver/faster-whisper:latest
-    container_name: faster-whisper
+  whisper-asr:
+    image: onerahmet/openai-whisper-asr-webservice:latest
+    container_name: whisper-asr
     environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=Europe/London
-      - WHISPER_MODEL=base
-      - WHISPER_LANG=en
+      - ASR_MODEL=base
+      - ASR_ENGINE=faster_whisper
     volumes:
-      - /path/to/config:/config
+      - whisper-cache:/root/.cache
     ports:
       - "9000:9000"
     restart: unless-stopped
+
+volumes:
+  whisper-cache:
 ```
+
+### Environment Variables
+
+| Variable | Options | Default | Purpose |
+|----------|---------|---------|---------|
+| `ASR_ENGINE` | `openai_whisper`, `faster_whisper`, `whisperx` | `openai_whisper` | Transcription engine |
+| `ASR_MODEL` | `tiny`, `base`, `small`, `medium`, `large-v3` | `base` | Model size |
+| `ASR_MODEL_PATH` | Path | - | Custom model location |
+| `ASR_DEVICE` | `cuda`, `cpu` | auto | Hardware selection |
 
 ### API Endpoint
 
-LinuxServer faster-whisper exposes:
+**Swagger UI:** `http://<host>:9000/docs`
 
+```bash
+# Transcribe audio file
+curl -X POST "http://localhost:9000/asr" \
+  -H "accept: application/json" \
+  -H "Content-Type: multipart/form-data" \
+  -F "audio_file=@recording.m4a"
+
+# With options
+curl -X POST "http://localhost:9000/asr?output=json&language=en" \
+  -H "accept: application/json" \
+  -F "audio_file=@recording.m4a"
 ```
-POST /asr
-Content-Type: multipart/form-data
 
-file: <audio file>
-language: auto (optional)
-model: base (optional)
-
-Response:
+**Response (JSON):**
+```json
 {
-  "text": "Transcribed text...",
-  "language": "en",
-  "duration": 45.2
+  "text": "Transcribed text content...",
+  "segments": [...],
+  "language": "en"
 }
 ```
+
+**Query Parameters:**
+| Param | Options | Description |
+|-------|---------|-------------|
+| `output` | `text`, `json`, `vtt`, `srt`, `tsv` | Response format |
+| `language` | ISO code or `auto` | Source language hint |
+| `word_timestamps` | `true`, `false` | Include word-level timing |
 
 ### NAS Deployment Notes
 
@@ -433,11 +471,11 @@ For TerraMaster T4 Max:
 2. Create docker-compose.yml in shared folder
 3. Pull image: `docker-compose pull`
 4. Start: `docker-compose up -d`
-5. Access at: `http://<nas-ip>:9000`
+5. Access Swagger UI at: `http://<nas-ip>:9000/docs`
 
 CPU-only transcription (no GPU). Model recommendations:
 - `tiny` - Fastest, lower accuracy
-- `base` - Good balance (recommended)
+- `base` - Good balance (recommended for NAS)
 - `small` - Better accuracy, slower
 - `medium`/`large` - Not recommended for NAS CPU
 
@@ -505,9 +543,9 @@ journalctl -u nota-transcribe -f
 ### Phase 3: Transcription Client
 
 **Beads:**
-1. Implement faster-whisper HTTP client
+1. Implement whisper-asr-webservice HTTP client
 2. Add retry logic with exponential backoff
-3. Create docker-compose.yml for service
+3. **[Polecat]** Find and document sample compose file for whisper-asr-webservice in `compose/whisper-asr/`
 4. Integration test with actual API
 
 ### Phase 4: Output & Archiving
