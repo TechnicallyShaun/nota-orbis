@@ -8,15 +8,11 @@ import (
 
 func TestVersion_OutputsVersionString(t *testing.T) {
 	// Save original values
-	origVersion := Version
-	origCommit := Commit
-	defer func() {
-		Version = origVersion
-		Commit = origCommit
-	}()
+	originalVersion := Version
+	defer func() { Version = originalVersion }()
 
+	// Set test version
 	Version = "1.2.3"
-	Commit = "abc123"
 
 	var buf bytes.Buffer
 	cmd := NewVersionCmd()
@@ -30,19 +26,18 @@ func TestVersion_OutputsVersionString(t *testing.T) {
 	if !strings.Contains(output, "1.2.3") {
 		t.Errorf("expected output to contain version '1.2.3', got: %q", output)
 	}
+	if !strings.Contains(output, "nota version") {
+		t.Errorf("expected output to contain 'nota version', got: %q", output)
+	}
 }
 
 func TestVersion_IncludesCommitHash(t *testing.T) {
 	// Save original values
-	origVersion := Version
-	origCommit := Commit
-	defer func() {
-		Version = origVersion
-		Commit = origCommit
-	}()
+	originalCommit := Commit
+	defer func() { Commit = originalCommit }()
 
-	Version = "2.0.0"
-	Commit = "def456789"
+	// Set test commit hash
+	Commit = "abc123def"
 
 	var buf bytes.Buffer
 	cmd := NewVersionCmd()
@@ -53,7 +48,10 @@ func TestVersion_IncludesCommitHash(t *testing.T) {
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, "def456789") {
-		t.Errorf("expected output to contain commit hash 'def456789', got: %q", output)
+	if !strings.Contains(output, "abc123def") {
+		t.Errorf("expected output to contain commit hash 'abc123def', got: %q", output)
+	}
+	if !strings.Contains(output, "commit:") {
+		t.Errorf("expected output to contain 'commit:', got: %q", output)
 	}
 }
