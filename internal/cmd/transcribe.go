@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -65,6 +66,7 @@ func NewTranscribeCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(NewTranscribeConfigCmd(nil))
+	cmd.AddCommand(newTranscribeStartCmd())
 
 	return cmd
 }
@@ -178,4 +180,40 @@ func promptRequired(prompter Prompter, prompt string) (string, error) {
 		return "", fmt.Errorf("value is required")
 	}
 	return value, nil
+}
+
+// newTranscribeStartCmd creates the transcribe start command
+func newTranscribeStartCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "start",
+		Short: "Start transcription service in foreground mode",
+		Long: `Start the transcription service in foreground mode.
+
+The service watches for audio files and automatically transcribes them using
+a whisper-asr-webservice instance. Configuration is read from .nota/transcribe.json
+in the current vault.
+
+The service runs until interrupted with Ctrl+C or SIGTERM.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Load configuration from vault
+			cfg, err := transcribe.Load()
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+
+			// Create and run service
+			svc, err := transcribe.NewService(cfg)
+			if err != nil {
+				return fmt.Errorf("create service: %w", err)
+			}
+
+			fmt.Fprintln(cmd.OutOrStdout(), "Starting transcription service...")
+			fmt.Fprintf(cmd.OutOrStdout(), "Watching: %s\n", cfg.WatchDir)
+			fmt.Fprintf(cmd.OutOrStdout(), "Output:   %s\n", cfg.OutputDir)
+			fmt.Fprintln(cmd.OutOrStdout(), "Press Ctrl+C to stop")
+			fmt.Fprintln(cmd.OutOrStdout())
+
+			return svc.Run(context.Background())
+		},
+	}
 }
