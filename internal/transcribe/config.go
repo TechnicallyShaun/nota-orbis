@@ -17,6 +17,7 @@ const ConfigFileName = "transcribe.json"
 // Default values for optional configuration fields
 const (
 	DefaultArchiveDir              = "~/.nota/archive/audio"
+	DefaultPidFilePath             = "~/.nota/transcribe.pid"
 	DefaultStabilizationIntervalMs = 2000
 	DefaultStabilizationChecks     = 3
 	DefaultLanguage                = "auto"
@@ -180,4 +181,14 @@ func expandTilde(path string) string {
 		return filepath.Join(home, path[2:])
 	}
 	return path
+}
+
+// ExpandTilde is the exported version of expandTilde for use by other packages.
+func ExpandTilde(path string) string {
+	return expandTilde(path)
+}
+
+// PidFilePath returns the expanded path to the PID file.
+func PidFilePath() string {
+	return expandTilde(DefaultPidFilePath)
 }

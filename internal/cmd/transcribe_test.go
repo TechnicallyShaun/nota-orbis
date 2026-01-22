@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -386,5 +387,175 @@ func TestTranscribeConfigCmd_AppliesDefaults(t *testing.T) {
 	}
 	if len(cfg.WatchPatterns) != len(transcribe.DefaultWatchPatterns) {
 		t.Errorf("expected WatchPatterns to have %d items, got %d", len(transcribe.DefaultWatchPatterns), len(cfg.WatchPatterns))
+	}
+}
+
+func TestTranscribeCmd_HasStopSubcommand(t *testing.T) {
+	cmd := NewTranscribeCmd()
+
+	found := false
+	for _, sub := range cmd.Commands() {
+		if sub.Use == "stop" {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Error("expected transcribe command to have stop subcommand")
+	}
+}
+
+func TestReadPidFile_ValidPid(t *testing.T) {
+	tmpDir := t.TempDir()
+	pidPath := filepath.Join(tmpDir, "test.pid")
+
+	if err := os.WriteFile(pidPath, []byte("12345\n"), 0644); err != nil {
+		t.Fatalf("failed to write PID file: %v", err)
+	}
+
+	pid, err := readPidFile(pidPath)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if pid != 12345 {
+		t.Errorf("expected PID 12345, got %d", pid)
+	}
+}
+
+func TestReadPidFile_InvalidPid(t *testing.T) {
+	tmpDir := t.TempDir()
+	pidPath := filepath.Join(tmpDir, "test.pid")
+
+	if err := os.WriteFile(pidPath, []byte("not-a-number\n"), 0644); err != nil {
+		t.Fatalf("failed to write PID file: %v", err)
+	}
+
+	_, err := readPidFile(pidPath)
+	if err == nil {
+		t.Error("expected error for invalid PID")
+	}
+}
+
+func TestReadPidFile_ZeroPid(t *testing.T) {
+	tmpDir := t.TempDir()
+	pidPath := filepath.Join(tmpDir, "test.pid")
+
+	if err := os.WriteFile(pidPath, []byte("0\n"), 0644); err != nil {
+		t.Fatalf("failed to write PID file: %v", err)
+	}
+
+	_, err := readPidFile(pidPath)
+	if err == nil {
+		t.Error("expected error for zero PID")
+	}
+}
+
+func TestReadPidFile_NegativePid(t *testing.T) {
+	tmpDir := t.TempDir()
+	pidPath := filepath.Join(tmpDir, "test.pid")
+
+	if err := os.WriteFile(pidPath, []byte("-123\n"), 0644); err != nil {
+		t.Fatalf("failed to write PID file: %v", err)
+	}
+
+	_, err := readPidFile(pidPath)
+	if err == nil {
+		t.Error("expected error for negative PID")
+	}
+}
+
+func TestReadPidFile_NotExists(t *testing.T) {
+	tmpDir := t.TempDir()
+	pidPath := filepath.Join(tmpDir, "nonexistent.pid")
+
+	_, err := readPidFile(pidPath)
+	if err == nil {
+		t.Error("expected error for nonexistent file")
+	}
+	if !os.IsNotExist(err) {
+		t.Errorf("expected os.IsNotExist error, got: %v", err)
+	}
+}
+
+func TestReadPidFile_WithWhitespace(t *testing.T) {
+	tmpDir := t.TempDir()
+	pidPath := filepath.Join(tmpDir, "test.pid")
+
+	if err := os.WriteFile(pidPath, []byte("  42  \n"), 0644); err != nil {
+		t.Fatalf("failed to write PID file: %v", err)
+	}
+
+	pid, err := readPidFile(pidPath)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if pid != 42 {
+		t.Errorf("expected PID 42, got %d", pid)
+	}
+}
+
+func TestTranscribeStopCmd_NoPidFile(t *testing.T) {
+	// Set a PID file path that doesn't exist
+	tmpDir := t.TempDir()
+	notaDir := filepath.Join(tmpDir, ".nota")
+	if err := os.Mkdir(notaDir, 0755); err != nil {
+		t.Fatalf("failed to create .nota directory: %v", err)
+	}
+
+	// Save original home and restore after test
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tmpDir)
+
+	var buf bytes.Buffer
+	cmd := newTranscribeStopCmd()
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Error("expected error when PID file doesn't exist")
+	}
+	if !errors.Is(err, ErrNotRunning) {
+		t.Errorf("expected ErrNotRunning, got: %v", err)
+	}
+}
+
+func TestTranscribeStopCmd_StalePidFile(t *testing.T) {
+	// Create a PID file with a PID that definitely doesn't exist
+	tmpDir := t.TempDir()
+	notaDir := filepath.Join(tmpDir, ".nota")
+	if err := os.Mkdir(notaDir, 0755); err != nil {
+		t.Fatalf("failed to create .nota directory: %v", err)
+	}
+	pidPath := filepath.Join(notaDir, "transcribe.pid")
+
+	// Use a very high PID that's unlikely to exist
+	if err := os.WriteFile(pidPath, []byte("999999999\n"), 0644); err != nil {
+		t.Fatalf("failed to write PID file: %v", err)
+	}
+
+	// Save original home and restore after test
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tmpDir)
+
+	var buf bytes.Buffer
+	cmd := newTranscribeStopCmd()
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Error("expected error for stale PID file")
+	}
+	if !errors.Is(err, ErrStaleProcess) {
+		t.Errorf("expected ErrStaleProcess, got: %v", err)
+	}
+
+	// Verify PID file was cleaned up
+	if _, statErr := os.Stat(pidPath); !os.IsNotExist(statErr) {
+		t.Error("expected stale PID file to be removed")
 	}
 }

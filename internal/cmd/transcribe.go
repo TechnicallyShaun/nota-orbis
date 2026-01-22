@@ -3,10 +3,14 @@ package cmd
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/TechnicallyShaun/nota-orbis/internal/transcribe"
 	"github.com/TechnicallyShaun/nota-orbis/internal/vault"
@@ -67,6 +71,7 @@ func NewTranscribeCmd() *cobra.Command {
 
 	cmd.AddCommand(NewTranscribeConfigCmd(nil))
 	cmd.AddCommand(newTranscribeStartCmd())
+	cmd.AddCommand(newTranscribeStopCmd())
 
 	return cmd
 }
@@ -216,4 +221,133 @@ The service runs until interrupted with Ctrl+C or SIGTERM.`,
 			return svc.Run(context.Background())
 		},
 	}
+}
+
+// stopTimeout is the maximum time to wait for graceful shutdown before sending SIGKILL
+const stopTimeout = 10 * time.Second
+
+// ErrNotRunning indicates the transcription service is not running
+var ErrNotRunning = errors.New("transcription service is not running")
+
+// ErrStaleProcess indicates the PID file exists but the process is not running
+var ErrStaleProcess = errors.New("stale PID file (process not running)")
+
+// newTranscribeStopCmd creates the transcribe stop command
+func newTranscribeStopCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "stop",
+		Short: "Stop the transcription service",
+		Long: `Stop the transcription service.
+
+Reads the PID from ~/.nota/transcribe.pid and sends SIGTERM for graceful shutdown.
+If the process doesn't exit within 10 seconds, SIGKILL is sent to force termination.
+The PID file is removed after the process exits.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTranscribeStop(cmd)
+		},
+	}
+}
+
+// runTranscribeStop stops the transcription service
+func runTranscribeStop(cmd *cobra.Command) error {
+	out := cmd.OutOrStdout()
+	pidPath := transcribe.PidFilePath()
+
+	// Read PID file
+	pid, err := readPidFile(pidPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ErrNotRunning
+		}
+		return fmt.Errorf("read PID file: %w", err)
+	}
+
+	// Check if process is running
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		// On Unix, FindProcess always succeeds, so this shouldn't happen
+		return fmt.Errorf("find process: %w", err)
+	}
+
+	// Check if process exists by sending signal 0
+	if err := process.Signal(syscall.Signal(0)); err != nil {
+		// Process doesn't exist - clean up stale PID file
+		if removeErr := os.Remove(pidPath); removeErr != nil && !os.IsNotExist(removeErr) {
+			fmt.Fprintf(out, "Warning: failed to remove stale PID file: %v\n", removeErr)
+		}
+		return ErrStaleProcess
+	}
+
+	fmt.Fprintf(out, "Stopping transcription service (PID %d)...\n", pid)
+
+	// Send SIGTERM for graceful shutdown
+	if err := process.Signal(syscall.SIGTERM); err != nil {
+		return fmt.Errorf("send SIGTERM: %w", err)
+	}
+
+	// Wait for process to exit with timeout
+	exited := waitForExit(pid, stopTimeout)
+
+	if !exited {
+		// Process didn't exit gracefully, send SIGKILL
+		fmt.Fprintln(out, "Process did not exit gracefully, sending SIGKILL...")
+		if err := process.Signal(syscall.SIGKILL); err != nil {
+			// Process may have exited between check and kill
+			if !errors.Is(err, os.ErrProcessDone) {
+				return fmt.Errorf("send SIGKILL: %w", err)
+			}
+		}
+		// Wait a bit more for SIGKILL to take effect
+		waitForExit(pid, 2*time.Second)
+	}
+
+	// Remove PID file
+	if err := os.Remove(pidPath); err != nil && !os.IsNotExist(err) {
+		fmt.Fprintf(out, "Warning: failed to remove PID file: %v\n", err)
+	}
+
+	fmt.Fprintln(out, "Transcription service stopped")
+	return nil
+}
+
+// readPidFile reads the PID from the specified file
+func readPidFile(path string) (int, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+
+	pidStr := strings.TrimSpace(string(data))
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil {
+		return 0, fmt.Errorf("invalid PID in file: %w", err)
+	}
+
+	if pid <= 0 {
+		return 0, fmt.Errorf("invalid PID: %d", pid)
+	}
+
+	return pid, nil
+}
+
+// waitForExit polls until the process exits or timeout is reached
+func waitForExit(pid int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	pollInterval := 100 * time.Millisecond
+
+	for time.Now().Before(deadline) {
+		process, err := os.FindProcess(pid)
+		if err != nil {
+			return true // Process gone
+		}
+
+		// Check if process still exists
+		if err := process.Signal(syscall.Signal(0)); err != nil {
+			return true // Process gone
+		}
+
+		time.Sleep(pollInterval)
+	}
+
+	return false // Timeout
 }
