@@ -6,6 +6,7 @@ on:
 
 jobs:
   add-to-project:
+    if: github.actor == 'TechnicallyShaun'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/add-to-project@158aad9ed186a4842abf69d0f8071a0ff95312d0 # v1.0.2+
